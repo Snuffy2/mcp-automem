@@ -98,7 +98,7 @@ describe('hermes setup handler', () => {
     expect(agents).toContain('<!-- BEGIN AUTOMEM HERMES RULES -->');
     expect(agents).toContain('<!-- END AUTOMEM HERMES RULES -->');
     expect(agents).toContain('MCP-only mode');
-    expect(agents).toContain('mcp_automem_recall_memory');
+    expect(agents).toContain('mcp__automem__recall_memory');
     expect(agents).not.toMatch(/`automem_recall_memory`/);
     expect(agents).not.toContain('mcp__memory__recall_memory');
     expect(agents).toContain('test-project');
@@ -306,7 +306,7 @@ describe('hermes setup handler', () => {
     const agents = fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf8');
     expect(agents).toContain('Provider-only mode');
     expect(agents).toContain('automem_recall_memory');
-    expect(agents).not.toContain('mcp_automem_recall_memory');
+    expect(agents).not.toContain('mcp__automem__recall_memory');
   });
 
   it('mcp mode removes AutoMem provider state from a prior provider install', async () => {
@@ -392,7 +392,7 @@ describe('hermes setup handler', () => {
 
     const agents = fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf8');
     expect(agents).toContain('Both mode');
-    expect(agents).toContain('mcp_automem_recall_memory');
+    expect(agents).toContain('mcp__automem__recall_memory');
     expect(agents).toContain('provider explicit tools are disabled');
     expect(agents).not.toMatch(/`automem_recall_memory`/);
   });

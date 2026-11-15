@@ -336,7 +336,7 @@ export async function applyHermesSetup(cliOptions: HermesSetupOptions): Promise<
   if (mode === 'mcp') {
     log('  2. Verify MCP tools: hermes mcp test automem', cliOptions.quiet);
     log(
-      '  3. Start a task — Hermes should use the mcp_automem_* tools when relevant',
+      '  3. Start a task — Hermes should use the mcp__automem__* tools when relevant',
       cliOptions.quiet
     );
   } else if (mode === 'both') {
@@ -344,7 +344,7 @@ export async function applyHermesSetup(cliOptions: HermesSetupOptions): Promise<
     log('  3. Verify provider mode: hermes memory status', cliOptions.quiet);
     log('  4. Run diagnostics: hermes automem doctor', cliOptions.quiet);
     log(
-      '  5. Explicit tools use mcp_automem_*; provider recall is injected into the model payload',
+      '  5. Explicit tools use mcp__automem__*; provider recall is injected into the model payload',
       cliOptions.quiet
     );
   } else {

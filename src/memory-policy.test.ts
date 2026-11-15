@@ -453,10 +453,23 @@ describe('shared AutoMem memory policy', () => {
   });
 
   it('renders Hermes mode-specific rules from the shared policy surface', () => {
-    expect(renderHermesModeRules('mcp')).toContain('mcp_automem_recall_memory');
+    expect(renderHermesModeRules('mcp')).toContain('mcp__automem__recall_memory');
     expect(renderHermesModeRules('provider')).toContain('automem_recall_memory');
-    expect(renderHermesModeRules('both')).toContain('mcp_automem_recall_memory');
+    expect(renderHermesModeRules('both')).toContain('mcp__automem__recall_memory');
     expect(renderHermesModeRules('both')).not.toMatch(/`automem_recall_memory`/);
+  });
+
+  it('uses the double-underscore MCP prefix Hermes registers for AutoMem tools', () => {
+    // Hermes registers MCP tools as mcp__<server>__<tool>; the single-underscore
+    // spelling names tools that do not exist on a Hermes host.
+    for (const mode of ['mcp', 'both'] as const) {
+      const rules = renderHermesModeRules(mode);
+      expect(rules).toContain('`mcp__automem__store_memory`');
+      expect(rules).not.toContain('mcp_automem_');
+    }
+    const providerSource = readRepoFile('templates/hermes/provider/__init__.py');
+    expect(providerSource).toContain("AutoMem MCP server's mcp__automem__* tools");
+    expect(providerSource).not.toContain('mcp_automem_');
   });
 
   it('sync-memory-policy is idempotent for generated policy artifacts', () => {

@@ -62,7 +62,7 @@ export const HOST_SMOKE_SPECS: HostSmokeSpec[] = [
     client: 'hermes',
     configPath: '$HERMES_HOME/config.yaml',
     installCommand: ['mcp-automem', 'hermes', '--mode', 'mcp'],
-    expectedToolNames: HERMES_AUTOMEM_TOOLS.map((name) => `mcp_automem_${name}`).sort(),
+    expectedToolNames: HERMES_AUTOMEM_TOOLS.map((name) => `mcp__automem__${name}`).sort(),
     validationCommand: ['hermes', 'mcp', 'test', 'automem'],
     realHostSmoke: 'required-when-installed',
   },

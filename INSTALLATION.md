@@ -1047,7 +1047,7 @@ AutoMem integrations use one shared AutoMem recall blueprint across hosts: prefe
 ### 1. Choose an install mode
 
 ```bash
-# MCP tools only: exposes mcp_automem_recall_memory, mcp_automem_store_memory, etc.
+# MCP tools only: exposes mcp__automem__recall_memory, mcp__automem__store_memory, etc.
 npx @verygoodplugins/mcp-automem@latest hermes --mode mcp
 
 # Native memory provider: activates AutoMem through memory.provider.
@@ -1070,7 +1070,7 @@ hermes memory status
 hermes automem doctor
 ```
 
-Then restart Hermes and ask it to check AutoMem health. In MCP mode, Hermes should expose `mcp_automem_check_database_health` and should not expose `delete_memory` by default.
+Then restart Hermes and ask it to check AutoMem health. In MCP mode, Hermes should expose `mcp__automem__check_database_health` and should not expose `delete_memory` by default.
 
 In provider mode, `hermes memory status` should show `Provider: automem` and `Status: available`. `hermes automem doctor` checks the configured AutoMem `/health` endpoint and runs a small recall-prefetch probe. Recall context is injected into the model payload before a turn; Hermes does not print that context in the terminal UI by default.
 
