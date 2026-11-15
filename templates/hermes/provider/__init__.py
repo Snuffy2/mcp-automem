@@ -2,14 +2,17 @@
 
 This plugin is installed into $HERMES_HOME/plugins/automem by the AutoMem
 installer. It uses Hermes' native MemoryProvider lifecycle for ambient recall
-and keeps automatic turn capture disabled by default.
+and keeps automatic turn capture disabled by default. Built-in memory-tool
+writes (MEMORY.md / USER.md) are mirrored to AutoMem via on_memory_write.
 """
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
+import queue
 import re
 import threading
 import urllib.error
@@ -53,6 +56,25 @@ else:
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:8001"
 DEFAULT_TIMEOUT = 8.0
+# Built-in memory mirroring runs off the Hermes tool thread, but keep each POST
+# short so a slow AutoMem cannot pile up behind the bounded mirror queue.
+MIRROR_TIMEOUT = 5.0
+MIRROR_QUEUE_SIZE = 32
+# Hermes' built-in MEMORY.md / USER.md entries are short; anything far larger is
+# not a memory entry and is skipped rather than truncated.
+MIRROR_MAX_CONTENT_CHARS = 8000
+MIRROR_PREVIOUS_CONTENT_CHARS = 1000
+MIRROR_SOURCE = "hermes_builtin_memory"
+# Provenance keys Hermes' MemoryManager passes in on_memory_write metadata.
+MIRROR_PROVENANCE_KEYS = (
+    "write_origin",
+    "execution_context",
+    "session_id",
+    "parent_session_id",
+    "platform",
+    "tool_call_id",
+    "task_id",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -72,6 +94,62 @@ def _debug(message: str, *args: Any) -> None:
 def _provider_tools_enabled() -> bool:
     value = os.environ.get("AUTOMEM_HERMES_PROVIDER_TOOLS", "true")
     return value.strip().lower() not in {"0", "false", "no", "n", "off"}
+
+
+def _mirror_builtin_enabled() -> bool:
+    value = os.environ.get("AUTOMEM_HERMES_MIRROR_BUILTIN", "true")
+    return value.strip().lower() not in {"0", "false", "no", "n", "off"}
+
+
+def _build_mirror_payload(
+    action: str,
+    target: str,
+    content: str,
+    metadata: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Map a Hermes built-in memory write to an AutoMem store payload.
+
+    Args:
+        action: Hermes memory-tool action (``add``, ``replace`` or ``remove``;
+            a memory-tool ``patch`` arrives as ``replace``).
+        target: ``memory`` (MEMORY.md) or ``user`` (USER.md).
+        content: The full entry after the write, already redacted by Hermes.
+        metadata: Hermes provenance (``write_origin``, ``session_id``,
+            ``previous_content`` ...), or None from older Hermes builds.
+
+    Returns:
+        The ``POST /memory`` body, or None when the write must not be mirrored:
+        ``remove`` (no safe mapping to an AutoMem id), an unknown action,
+        empty or oversized content, or a replace that changed nothing.
+    """
+    if action not in {"add", "replace"}:
+        return None
+    clean = _clean_text(content)
+    if not clean or len(clean) > MIRROR_MAX_CONTENT_CHARS:
+        return None
+    meta = metadata if isinstance(metadata, dict) else {}
+    previous = meta.get("previous_content")
+    if action == "replace" and isinstance(previous, str) and _clean_text(previous) == clean:
+        return None
+
+    mirror_meta: Dict[str, Any] = {
+        "source": MIRROR_SOURCE,
+        "hermes_action": action,
+        "hermes_target": target,
+    }
+    for key in MIRROR_PROVENANCE_KEYS:
+        value = meta.get(key)
+        if isinstance(value, str) and value:
+            mirror_meta[key] = value
+    if action == "replace" and isinstance(previous, str) and previous.strip():
+        mirror_meta["previous_content"] = previous.strip()[:MIRROR_PREVIOUS_CONTENT_CHARS]
+
+    payload: Dict[str, Any] = {"content": clean, "metadata": mirror_meta}
+    if target == "user":
+        # USER.md holds the user profile: recall it with the preference phase.
+        payload["tags"] = ["preference"]
+        payload["type"] = "Preference"
+    return payload
 
 
 def _api_key() -> str:
@@ -287,6 +365,13 @@ class AutoMemMemoryProvider(MemoryProvider):
         self._write_enabled = True
         self._sync_thread: Optional[threading.Thread] = None
         self._session_state: Dict[str, Dict[str, Any]] = {}
+        self._mirror_builtin = True
+        self._mirror_client: Optional[AutoMemClient] = None
+        self._mirror_queue: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue(
+            maxsize=MIRROR_QUEUE_SIZE
+        )
+        self._mirror_thread: Optional[threading.Thread] = None
+        self._mirror_lock = threading.Lock()
 
     @property
     def name(self) -> str:
@@ -323,14 +408,17 @@ class AutoMemMemoryProvider(MemoryProvider):
         self._auto_capture = _truthy(os.environ.get("AUTOMEM_HERMES_AUTO_CAPTURE", ""))
         agent_context = kwargs.get("agent_context", "")
         self._write_enabled = agent_context not in {"cron", "flush", "subagent"}
+        self._mirror_builtin = _mirror_builtin_enabled()
         self._client = AutoMemClient(self._endpoint, self._api_key)
+        self._mirror_client = AutoMemClient(self._endpoint, self._api_key, timeout=MIRROR_TIMEOUT)
         self._active = bool(self._endpoint)
         _debug(
-            "initialized provider endpoint=%s api_key_set=%s provider_tools=%s auto_capture=%s agent_context=%s",
+            "initialized provider endpoint=%s api_key_set=%s provider_tools=%s auto_capture=%s mirror_builtin=%s agent_context=%s",
             self._endpoint,
             bool(self._api_key),
             _provider_tools_enabled(),
             self._auto_capture,
+            self._mirror_builtin,
             agent_context or "primary",
         )
 
@@ -511,6 +599,98 @@ class AutoMemMemoryProvider(MemoryProvider):
         self._sync_thread = threading.Thread(target=_run, daemon=True, name="automem-sync")
         self._sync_thread.start()
 
+    def on_memory_write(
+        self,
+        action: str,
+        target: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Mirror a Hermes built-in memory write (MEMORY.md / USER.md) to AutoMem.
+
+        Hermes calls this synchronously on the tool thread after the built-in
+        memory tool commits, with content already scrubbed of secrets by its
+        MemoryManager. The store is queued for a background worker, so the turn
+        never waits on the network and nothing here raises.
+
+        ``add`` and ``replace`` store the entry's new content; a replace does not
+        delete the earlier AutoMem copy. ``remove`` is not mirrored: the provider
+        keeps no mapping from built-in entries to AutoMem ids, and deleting by
+        content match could remove memories stored on purpose elsewhere.
+
+        Args:
+            action: ``add``, ``replace`` or ``remove``.
+            target: ``memory`` or ``user``.
+            content: The entry after the write.
+            metadata: Hermes provenance; absent on older Hermes builds.
+        """
+        if (
+            not self._active
+            or not self._mirror_builtin
+            or not self._write_enabled
+            or not self._mirror_client
+        ):
+            return
+        try:
+            payload = _build_mirror_payload(action, target, content, metadata)
+        except (TypeError, AttributeError) as exc:
+            logger.debug("[automem] built-in memory mirror skipped malformed write: %s", exc)
+            return
+        if payload is None:
+            _debug("built-in memory %s on %s not mirrored", action, target)
+            return
+        try:
+            self._mirror_queue.put_nowait(payload)
+        except queue.Full:
+            logger.warning(
+                "[automem] built-in memory mirror queue full; dropped %s on %s", action, target
+            )
+            return
+        self._ensure_mirror_worker()
+
+    def _ensure_mirror_worker(self) -> None:
+        with self._mirror_lock:
+            if self._mirror_thread and self._mirror_thread.is_alive():
+                return
+            self._mirror_thread = threading.Thread(
+                target=self._mirror_worker, daemon=True, name="automem-mirror"
+            )
+            self._mirror_thread.start()
+
+    def _mirror_worker(self) -> None:
+        while True:
+            payload = self._mirror_queue.get()
+            if payload is None:
+                return
+            self._store_mirror(payload)
+
+    def _store_mirror(self, payload: Dict[str, Any]) -> None:
+        """POST one mirrored entry exactly once.
+
+        A timed-out POST may already have been committed by AutoMem, so it is
+        logged and dropped rather than retried; a retry is how duplicates appear.
+        """
+        client = self._mirror_client
+        if client is None:
+            return
+        target = payload.get("metadata", {}).get("hermes_target", "")
+        try:
+            client.store(payload)
+        except urllib.error.HTTPError as exc:
+            logger.warning("[automem] built-in memory mirror HTTP %s for %s", exc.code, target)
+        except (TimeoutError, urllib.error.URLError) as exc:
+            reason = getattr(exc, "reason", exc)
+            if isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError):
+                logger.warning(
+                    "[automem] built-in memory mirror timed out for %s; not retried", target
+                )
+            else:
+                logger.warning("[automem] built-in memory mirror failed for %s: %s", target, reason)
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            logger.warning("[automem] built-in memory mirror failed for %s: %s", target, exc)
+        else:
+            _debug("mirrored built-in memory write to AutoMem target=%s", target)
+
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
         if not _provider_tools_enabled():
             return []
@@ -606,6 +786,16 @@ class AutoMemMemoryProvider(MemoryProvider):
         if self._sync_thread and self._sync_thread.is_alive():
             self._sync_thread.join(timeout=5.0)
         self._sync_thread = None
+        with self._mirror_lock:
+            mirror_thread = self._mirror_thread
+            self._mirror_thread = None
+        if mirror_thread and mirror_thread.is_alive():
+            try:
+                self._mirror_queue.put(None, timeout=1.0)
+            except queue.Full:
+                logger.debug("[automem] mirror queue full at shutdown; worker left as daemon")
+            else:
+                mirror_thread.join(timeout=MIRROR_TIMEOUT + 1.0)
         _debug("shutdown complete")
 
 

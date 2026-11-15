@@ -254,6 +254,69 @@ finally:
   return JSON.parse(lastJsonLine);
 }
 
+/**
+ * Drives built-in memory-tool results through Hermes' own MemoryManager, the seam that
+ * calls a provider's `on_memory_write`, so the signature dispatch, redaction and
+ * patch-to-replace mapping are Hermes' real code rather than a stub.
+ */
+async function mirrorHermesBuiltinMemoryWrites(home: string): Promise<void> {
+  if (!HERMES_PYTHON) {
+    throw new Error('Hermes Python is not available');
+  }
+
+  const script = String.raw`
+import json
+import logging
+import os
+
+from agent.memory_manager import MemoryManager
+from hermes_cli.env_loader import load_hermes_dotenv
+from plugins.memory import load_memory_provider
+
+logging.disable(logging.CRITICAL)
+load_hermes_dotenv(hermes_home=os.environ.get("HERMES_HOME"))
+
+provider = load_memory_provider("automem")
+if not provider:
+    raise RuntimeError("AutoMem provider did not load")
+
+manager = MemoryManager()
+manager.add_provider(provider)
+manager.initialize_all("mirror-contract", hermes_home=os.environ.get("HERMES_HOME"), platform="cli", agent_context="primary")
+metadata = lambda: {"write_origin": "assistant_tool", "session_id": "mirror-contract", "tool_name": "memory"}
+ok = lambda **extra: json.dumps({"success": True, **extra})
+manager.notify_memory_tool_write(ok(), {"action": "add", "target": "user", "content": "Prefers metric units."}, build_metadata=metadata)
+manager.notify_memory_tool_write(
+    ok(replaced_entry="Staging runs on port 7341."),
+    {"action": "replace", "target": "memory", "old_text": "7341", "content": "Staging runs on port 7342."},
+    build_metadata=metadata,
+)
+manager.notify_memory_tool_write(
+    ok(removed_entry="Retired fact."),
+    {"action": "remove", "target": "memory", "old_text": "Retired"},
+    build_metadata=metadata,
+)
+manager.notify_memory_tool_write(json.dumps({"success": False}), {"action": "add", "target": "memory", "content": "Failed write."}, build_metadata=metadata)
+manager.shutdown_all()
+print(json.dumps({"done": True}))
+`;
+
+  await execFileAsync(HERMES_PYTHON, ['-c', script], {
+    encoding: 'utf8',
+    cwd: REPO_ROOT,
+    timeout: 30_000,
+    maxBuffer: 1024 * 1024 * 10,
+    env: {
+      ...process.env,
+      HERMES_HOME: home,
+      HERMES_IGNORE_RULES: 'true',
+      AUTOMEM_API_KEY: '',
+      AUTOMEM_API_TOKEN: '',
+      DOTENV_CONFIG_QUIET: 'true',
+    },
+  });
+}
+
 async function inspectHermesProviderContract(home: string): Promise<{
   available: boolean;
   prefetch: string;
@@ -596,6 +659,47 @@ describe.skipIf(!HERMES_PYTHON)('Hermes real host integration', () => {
     expect(
       fakeApi.requests.some((request) => request.method === 'POST' && request.path === '/memory')
     ).toBe(false);
+  }, 45_000);
+
+  it('provider mirrors built-in memory adds and replaces, but not removes', async () => {
+    await applyHermesSetup({
+      mode: 'provider',
+      targetDir: tmpDir,
+      endpoint: fakeApi.url,
+      apiKey: 'test-key',
+      projectName: 'host-smoke',
+      quiet: true,
+    });
+
+    await mirrorHermesBuiltinMemoryWrites(tmpDir);
+
+    const stores = fakeApi.requests
+      .filter((request) => request.method === 'POST' && request.path === '/memory')
+      .map(
+        (request) =>
+          request.body as { content: string; tags?: string[]; metadata?: Record<string, unknown> }
+      );
+    expect(stores).toHaveLength(2);
+    const [userAdd, replace] = [...stores].sort((a, b) => a.content.localeCompare(b.content));
+    expect(userAdd).toMatchObject({
+      content: 'Prefers metric units.',
+      tags: ['preference'],
+      type: 'Preference',
+      metadata: {
+        source: 'hermes_builtin_memory',
+        hermes_action: 'add',
+        hermes_target: 'user',
+        session_id: 'mirror-contract',
+      },
+    });
+    expect(replace.content).toBe('Staging runs on port 7342.');
+    expect(replace.tags).toBeUndefined();
+    expect(replace.metadata).toMatchObject({
+      hermes_action: 'replace',
+      hermes_target: 'memory',
+      previous_content: 'Staging runs on port 7341.',
+    });
+    expect(fakeApi.requests.some((request) => request.method === 'DELETE')).toBe(false);
   }, 45_000);
 
   it('provider system prompt advertises automem_* tools only when they are registered', async () => {
