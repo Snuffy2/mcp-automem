@@ -180,6 +180,36 @@ function memoryStateFields(raw: any): Pick<StoredMemory, 't_valid' | 't_invalid'
   };
 }
 
+// Mirrors the service's ranked-recall currency test (_state_reason_for_memory): archived,
+// not yet valid (t_valid in the future) or expired (t_invalid at or before now). Naive
+// ISO timestamps are UTC there, so they are read as UTC here; unparseable values are ignored.
+function parseStateTime(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value * 1000;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  let candidate = value.trim();
+  if (/T\d{2}:\d{2}/.test(candidate) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(candidate)) {
+    candidate += 'Z';
+  }
+  const parsed = Date.parse(candidate);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function isCurrentMemory(raw: any, now: number): boolean {
+  if (raw?.archived === true) return false;
+  const tValid = parseStateTime(raw?.t_valid);
+  if (tValid !== null && tValid > now) return false;
+  const tInvalid = parseStateTime(raw?.t_invalid);
+  if (tInvalid !== null && tInvalid <= now) return false;
+  return true;
+}
+
+// Same precedence as GET /recall: an explicit current_only wins, then state_mode, then current.
+function resolveCurrentOnly(args: RecallMemoryArgs): boolean {
+  if (typeof args.current_only === 'boolean') return args.current_only;
+  if (args.state_mode === 'history') return false;
+  return true;
+}
+
 function wrapMemoryAsRecallResult(raw: any): RecallResult['results'][number] {
   const memory = mapStoredMemory(raw);
   return {
@@ -571,9 +601,7 @@ export class AutoMemClient {
         'relation_limit',
         'expand_min_importance',
         'expand_min_strength',
-        'current_only',
         'state_debug',
-        'state_mode',
         'recency_bias',
         'scope_fallback',
         'expand_respect_tags',
@@ -596,10 +624,10 @@ export class AutoMemClient {
       });
       if (conflicting.length > 0) {
         throw new Error(
-          `recall_memory: enumeration mode (\`exhaustive: true\`) only accepts \`tags\`, \`limit\`, \`offset\`, \`tag_mode: "any"\`, \`tag_match: "exact"\`, and \`format\`. Remove ranked-only param(s): ${conflicting.join(', ')}.`
+          `recall_memory: enumeration mode (\`exhaustive: true\`) only accepts \`tags\`, \`limit\`, \`offset\`, \`current_only\`, \`state_mode\`, \`tag_mode: "any"\`, \`tag_match: "exact"\`, and \`format\`. Remove ranked-only param(s): ${conflicting.join(', ')}.`
         );
       }
-      return this.listByTag(cleanTags, args.limit, args.offset);
+      return this.listByTag(cleanTags, args.limit, args.offset, resolveCurrentOnly(args));
     }
 
     // Mode 3: ranked retrieval — existing /recall path.
@@ -837,7 +865,16 @@ export class AutoMemClient {
     }
   }
 
-  private async listByTag(tags: string[], limit?: number, offset?: number): Promise<RecallResult> {
+  // GET /memory/by-tag has no state filter, so current_only is applied here to the page
+  // the server returned. Pagination stays in server terms: has_more is the server's, and
+  // enumeration_page records how many server records the page covered and where each
+  // kept record sat, so next_offset never re-reads or skips an unfiltered record.
+  private async listByTag(
+    tags: string[],
+    limit: number | undefined,
+    offset: number | undefined,
+    currentOnly: boolean
+  ): Promise<RecallResult> {
     const params = new URLSearchParams();
     tags.forEach((tag) => params.append('tags', tag));
     if (typeof limit === 'number' && limit > 0) {
@@ -847,15 +884,35 @@ export class AutoMemClient {
       params.set('offset', String(Math.floor(offset)));
     }
     const response = await this.makeRequest('GET', `memory/by-tag?${params.toString()}`);
-    const memories = Array.isArray(response.memories) ? response.memories : [];
+    const memories: any[] = Array.isArray(response.memories) ? response.memories : [];
+    const now = Date.now();
+    const positions: number[] = [];
+    const kept: any[] = [];
+    memories.forEach((memory, index) => {
+      if (currentOnly && !isCurrentMemory(memory, now)) return;
+      positions.push(index);
+      kept.push(memory);
+    });
+    const suppressed = memories.length - kept.length;
     return {
-      results: memories.map((m: any) => wrapMemoryAsRecallResult(m)),
-      count: typeof response.count === 'number' ? response.count : memories.length,
+      results: kept.map((m: any) => wrapMemoryAsRecallResult(m)),
+      count: kept.length,
       mode: 'enumeration',
       tags: response.tags ?? tags,
       limit: response.limit,
       offset: response.offset,
       has_more: typeof response.has_more === 'boolean' ? response.has_more : undefined,
+      state_mode: currentOnly ? 'current' : 'history',
+      ...(currentOnly
+        ? {
+            state_filter: {
+              current_only: true,
+              suppressed_count: suppressed,
+              replacement_count: 0,
+            },
+          }
+        : {}),
+      enumeration_page: { scanned: memories.length, positions },
     };
   }
 

@@ -1161,6 +1161,114 @@ describe('buildRecallMemoryResponse', () => {
       }
     });
 
+    it('pages a current_only-filtered enumeration in server offsets', async () => {
+      // A fake GET /memory/by-tag over 60 records, every third one not current. The
+      // client drops those, so pages hold fewer results than the server returned; a
+      // pager must still advance by server records and see each current one once.
+      const stale = (i: number): Record<string, unknown> =>
+        [
+          { t_invalid: '2026-01-02T00:00:00Z' },
+          { archived: true },
+          { t_valid: '2999-01-01T00:00:00Z' },
+        ][(i / 3) % 3];
+      const records = Array.from({ length: 60 }, (_, i) => ({
+        id: `mem-${i}`,
+        content: `memory ${i} `.padEnd(1500, 'x'),
+        tags: ['audit'],
+        importance: 0.5,
+        timestamp: '2026-01-01T00:00:00Z',
+        ...(i % 3 === 0 ? stale(i) : {}),
+      }));
+      const currentIds = records.filter((_, i) => i % 3 !== 0).map((r) => r.id);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: string) => {
+          const url = new URL(input);
+          const limit = Number(url.searchParams.get('limit') ?? 20);
+          const offset = Number(url.searchParams.get('offset') ?? 0);
+          const memories = records.slice(offset, offset + limit);
+          return {
+            ok: true,
+            json: async () => ({
+              status: 'success',
+              tags: ['audit'],
+              count: memories.length,
+              limit,
+              offset,
+              has_more: offset + limit < records.length,
+              memories,
+            }),
+          };
+        })
+      );
+      const client = new AutoMemClient({ endpoint: 'http://127.0.0.1:8001', maxRetries: 0 });
+      try {
+        const first = (await buildRecallMemoryResponse(client, {
+          tags: ['audit'],
+          exhaustive: true,
+          limit: 6,
+        })) as any;
+        expect(first.structuredContent).toMatchObject({
+          count: 4,
+          limit: 6,
+          offset: 0,
+          has_more: true,
+          next_offset: 6,
+          state_mode: 'current',
+          state_filter: { current_only: true, suppressed_count: 2, replacement_count: 0 },
+        });
+        expect(first.content.at(-1).text).toContain('state filter suppressed 2');
+
+        // limit 6 pages are small enough to show whole; limit 200 is one server page the
+        // budget trims, so its next page starts at the first current record not shown.
+        for (const limit of [6, 200]) {
+          for (const format of FORMATS) {
+            for (const next of [
+              (sc: any) => sc.next_offset as number,
+              (sc: any) => (sc.offset as number) + (sc.limit as number),
+            ]) {
+              const seen: string[] = [];
+              let offset = 0;
+              for (let guard = 0; guard < 30; guard += 1) {
+                const response = await buildRecallMemoryResponse(client, {
+                  tags: ['audit'],
+                  exhaustive: true,
+                  limit,
+                  offset,
+                  format,
+                });
+                expect(fitsBudget(response)).toBe(true);
+                const sc = response.structuredContent as any;
+                seen.push(...sc.results.map((r: any) => r.memory_id));
+                if (!sc.has_more) break;
+                offset = next(sc);
+              }
+              expect(seen, `${format} @ limit ${limit}`).toEqual(currentIds);
+            }
+          }
+        }
+
+        // current_only: false (or state_mode: "history") lists the full history.
+        for (const history of [{ current_only: false }, { state_mode: 'history' as const }]) {
+          const sc = (
+            await buildRecallMemoryResponse(client, {
+              tags: ['audit'],
+              exhaustive: true,
+              limit: 6,
+              ...history,
+            })
+          ).structuredContent as any;
+          expect(sc.results.map((r: any) => r.memory_id)).toEqual(
+            records.slice(0, 6).map((r) => r.id)
+          );
+          expect(sc).toMatchObject({ count: 6, next_offset: 6, state_mode: 'history' });
+          expect(sc).not.toHaveProperty('state_filter');
+        }
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('refuses an enumeration page that cannot show even one record', async () => {
       // Returning an empty page with has_more would send a pager back to the same
       // offset forever.

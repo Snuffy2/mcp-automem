@@ -403,7 +403,7 @@ const recallMemorySchema = {
     current_only: {
       type: 'boolean',
       description:
-        'Ranked-mode only. Suppress archived, expired, not-yet-valid, invalidated, or superseded memories. Defaults to true server-side.',
+        'Suppress archived, expired, not-yet-valid, invalidated, or superseded memories. Defaults to true; enumeration (`exhaustive: true`) applies it to each page by archived/t_valid/t_invalid. Set false for full history.',
     },
     state_debug: {
       type: 'boolean',
@@ -605,7 +605,7 @@ const openClawPlugin = {
       name: 'automem_recall_memory',
       label: 'AutoMem Recall Memory',
       description:
-        'Recall memories in one of three modes. (1) ID fetch: pass `memory_id`. (2) Tag enumeration: pass `tags` + `exhaustive: true` for paginated exact-match listing. (3) Ranked retrieval (default): hybrid search across vector/keyword/tags/recency, current-only by default server-side.',
+        'Recall memories in one of three modes. (1) ID fetch: pass `memory_id`. (2) Tag enumeration: pass `tags` + `exhaustive: true` for paginated exact-match listing, current-only by default (`current_only: false` for full history). (3) Ranked retrieval (default): hybrid search across vector/keyword/tags/recency, current-only by default server-side.',
       parameters: recallMemorySchema,
       async execute(_toolCallId, params) {
         const request = params as RecallMemoryArgs;
