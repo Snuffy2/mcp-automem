@@ -397,6 +397,51 @@ describe('hermes setup handler', () => {
     expect(agents).not.toMatch(/`automem_recall_memory`/);
   });
 
+  it.each([
+    ['mcp', true],
+    ['both', true],
+    ['provider', false],
+  ] as const)(
+    '%s mode next steps mention background review extra_tools: %s',
+    async (mode, expected) => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      let output: string;
+      try {
+        await applyHermesSetup({
+          mode,
+          targetDir: tmpDir,
+          projectName: 'test-project',
+          endpoint: 'http://127.0.0.1:8001',
+          apiKey: 'sk-test',
+        });
+        output = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      } finally {
+        logSpy.mockRestore();
+      }
+
+      if (expected) {
+        expect(output).toContain('auxiliary.background_review.extra_tools');
+        for (const tool of [
+          'mcp__automem__recall_memory',
+          'mcp__automem__store_memory',
+          'mcp__automem__update_memory',
+          'mcp__automem__associate_memories',
+          'tool_describe',
+        ]) {
+          expect(output).toContain(tool);
+        }
+      } else {
+        expect(output).not.toContain('background_review');
+      }
+      // The hint is text only: the installer must not write the auxiliary block.
+      const parsed = parseYaml(fs.readFileSync(path.join(tmpDir, 'config.yaml'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      expect(parsed.auxiliary).toBeUndefined();
+    }
+  );
+
   it('removes stale AutoMem Codex rules from Hermes AGENTS.md', async () => {
     const agentsPath = path.join(tmpDir, 'AGENTS.md');
     fs.writeFileSync(

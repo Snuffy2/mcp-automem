@@ -1096,6 +1096,27 @@ _`hermes -z` pulls the seeded fact out of recall and answers `Port 7341`._
 
 > Maintainers: both visuals are regenerated against an isolated, freshly seeded demo stack with `npm run docs:hermes` (see `scripts/build-hermes-demos.mjs`). They never capture a personal corpus.
 
+### Let background review write to AutoMem
+
+Hermes runs a post-turn **background review** agent to save durable memories and skill updates. That agent runs under a tool whitelist: the built-in `memory` and `skills` toolsets, `read_file`/`search_files`, and whatever you list in `auxiliary.background_review.extra_tools` in `$HERMES_HOME/config.yaml`. Everything else is denied.
+
+Hermes defers MCP tools behind `tool_search` / `tool_describe` / `tool_call`. A `tool_call` is unwrapped to the underlying tool name before the whitelist check, so the AutoMem tool itself must be listed; `tool_describe` is checked under its own name. Without these entries the background review can never write to AutoMem. The installer does not edit this block, so add it yourself in MCP or `both` mode:
+
+```yaml
+auxiliary:
+  background_review:
+    extra_tools:
+      - mcp__automem__recall_memory
+      - mcp__automem__store_memory
+      - mcp__automem__update_memory
+      - mcp__automem__associate_memories
+      - tool_describe
+```
+
+Merge it into any existing `auxiliary:` block rather than adding a second one, then restart Hermes. Add `tool_search` to the list too if you want the reviewer to discover tools by search; with the list above it calls the AutoMem tools by name.
+
+This needs Hermes v0.21.6 or later, the first release with `auxiliary.background_review.extra_tools`. The same release switched MCP tool names to `mcp__<server>__<tool>`; older Hermes builds named them `mcp_automem_*` and have no way to admit them to the background review.
+
 ### 4. Uninstall
 
 ```bash

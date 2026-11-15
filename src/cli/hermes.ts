@@ -355,6 +355,16 @@ export async function applyHermesSetup(cliOptions: HermesSetupOptions): Promise<
       cliOptions.quiet
     );
   }
+  if (mode === 'mcp' || mode === 'both') {
+    log(
+      '\nℹ️  To let Hermes background review save memories, list the AutoMem tools under\n' +
+        '   auxiliary.background_review.extra_tools in config.yaml (Hermes v0.21.6+):\n' +
+        '   mcp__automem__recall_memory, mcp__automem__store_memory,\n' +
+        '   mcp__automem__update_memory, mcp__automem__associate_memories, tool_describe\n' +
+        '   See INSTALLATION.md#let-background-review-write-to-automem',
+      cliOptions.quiet
+    );
+  }
 }
 
 function parseHermesMode(value: string): HermesInstallMode {
