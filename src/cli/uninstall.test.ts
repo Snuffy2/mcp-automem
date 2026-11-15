@@ -6,6 +6,7 @@ import { parse as parseYaml } from 'yaml';
 import { removeManagedHookEntries } from './claude-code.js';
 import { applyCursorSetup } from './cursor.js';
 import { applyCodexSetup } from './codex.js';
+import { applyHermesSetup } from './hermes.js';
 import { cursorLocalPluginDir, installCursorPlugin } from './cursor-plugin.js';
 import { parseUninstallArgs, runUninstall } from './uninstall.js';
 
@@ -223,6 +224,59 @@ describe('uninstall hermes', () => {
     expect(fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf8')).not.toContain(
       'BEGIN AUTOMEM HERMES RULES'
     );
+  });
+
+  it('strips the rules from SOUL.md and keeps the persona', async () => {
+    const soulPath = path.join(tmpDir, 'SOUL.md');
+    fs.writeFileSync(
+      soulPath,
+      [
+        '# Persona',
+        '',
+        'You are a terse assistant.',
+        '',
+        '<!-- BEGIN AUTOMEM HERMES RULES -->',
+        'AutoMem managed rules',
+        '<!-- END AUTOMEM HERMES RULES -->',
+        '',
+      ].join('\n')
+    );
+
+    await runUninstall({ platform: 'hermes', projectDir: tmpDir, yes: true, quiet: true });
+
+    expect(fs.readFileSync(soulPath, 'utf8')).toBe('# Persona\n\nYou are a terse assistant.\n');
+  });
+
+  // The installer creates SOUL.md when it is missing. Leaving an empty file behind would
+  // stop Hermes from seeding its default persona, which it only does for a missing file.
+  it('removes a SOUL.md that held only the AutoMem block', async () => {
+    const soulPath = path.join(tmpDir, 'SOUL.md');
+    fs.writeFileSync(
+      soulPath,
+      '<!-- BEGIN AUTOMEM HERMES RULES -->\nAutoMem managed rules\n<!-- END AUTOMEM HERMES RULES -->\n'
+    );
+
+    await runUninstall({ platform: 'hermes', projectDir: tmpDir, yes: true, quiet: true });
+
+    expect(fs.existsSync(soulPath)).toBe(false);
+    expect(fs.readFileSync(`${soulPath}.bak`, 'utf8')).toContain('AutoMem managed rules');
+  });
+
+  it('install then uninstall restores the original SOUL.md', async () => {
+    const soulPath = path.join(tmpDir, 'SOUL.md');
+    const persona = '# Persona\n\nYou are a terse assistant.\n';
+    fs.writeFileSync(soulPath, persona);
+
+    await applyHermesSetup({
+      targetDir: tmpDir,
+      projectName: 'demo',
+      endpoint: 'https://example.automem.test',
+      quiet: true,
+    });
+    expect(fs.readFileSync(soulPath, 'utf8')).toContain('BEGIN AUTOMEM HERMES RULES');
+
+    await runUninstall({ platform: 'hermes', projectDir: tmpDir, yes: true, quiet: true });
+    expect(fs.readFileSync(soulPath, 'utf8')).toBe(persona);
   });
 
   it('does not remove a non-AutoMem memory MCP server', async () => {

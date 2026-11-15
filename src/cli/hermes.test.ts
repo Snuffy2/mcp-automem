@@ -53,7 +53,7 @@ describe('hermes setup handler', () => {
     vi.clearAllMocks();
   });
 
-  it('fresh install writes config.yaml and AGENTS.md', async () => {
+  it('fresh install writes config.yaml and SOUL.md', async () => {
     await applyHermesSetup({
       targetDir: tmpDir,
       projectName: 'test-project',
@@ -63,10 +63,10 @@ describe('hermes setup handler', () => {
     });
 
     const configPath = path.join(tmpDir, 'config.yaml');
-    const agentsPath = path.join(tmpDir, 'AGENTS.md');
+    const soulPath = path.join(tmpDir, 'SOUL.md');
 
     expect(fs.existsSync(configPath)).toBe(true);
-    expect(fs.existsSync(agentsPath)).toBe(true);
+    expect(fs.existsSync(soulPath)).toBe(true);
 
     const parsed = parseYaml(fs.readFileSync(configPath, 'utf8')) as {
       mcp_servers: Record<
@@ -94,7 +94,7 @@ describe('hermes setup handler', () => {
     expect(parsed.mcp_servers.automem.sampling.enabled).toBe(false);
     expect(parsed.mcp_servers.memory).toBeUndefined();
 
-    const agents = fs.readFileSync(agentsPath, 'utf8');
+    const agents = fs.readFileSync(soulPath, 'utf8');
     expect(agents).toContain('<!-- BEGIN AUTOMEM HERMES RULES -->');
     expect(agents).toContain('<!-- END AUTOMEM HERMES RULES -->');
     expect(agents).toContain('MCP-only mode');
@@ -102,6 +102,8 @@ describe('hermes setup handler', () => {
     expect(agents).not.toMatch(/`automem_recall_memory`/);
     expect(agents).not.toContain('mcp__memory__recall_memory');
     expect(agents).toContain('test-project');
+    // Hermes never loads <HERMES_HOME>/AGENTS.md, so the installer must not create it.
+    expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
   });
 
   it('re-running is idempotent (no second-run diff)', async () => {
@@ -115,13 +117,13 @@ describe('hermes setup handler', () => {
 
     await applyHermesSetup(opts);
     const configPath = path.join(tmpDir, 'config.yaml');
-    const agentsPath = path.join(tmpDir, 'AGENTS.md');
+    const soulPath = path.join(tmpDir, 'SOUL.md');
     const configAfterFirst = fs.readFileSync(configPath, 'utf8');
-    const agentsAfterFirst = fs.readFileSync(agentsPath, 'utf8');
+    const soulAfterFirst = fs.readFileSync(soulPath, 'utf8');
 
     await applyHermesSetup(opts);
     expect(fs.readFileSync(configPath, 'utf8')).toBe(configAfterFirst);
-    expect(fs.readFileSync(agentsPath, 'utf8')).toBe(agentsAfterFirst);
+    expect(fs.readFileSync(soulPath, 'utf8')).toBe(soulAfterFirst);
   });
 
   it('--dry-run writes nothing', async () => {
@@ -135,7 +137,7 @@ describe('hermes setup handler', () => {
     });
 
     expect(fs.existsSync(path.join(tmpDir, 'config.yaml'))).toBe(false);
-    expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
   });
 
   it('HERMES_HOME env var resolves the install location', async () => {
@@ -147,7 +149,7 @@ describe('hermes setup handler', () => {
     });
 
     expect(fs.existsSync(path.join(tmpDir, 'config.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, 'AGENTS.md'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(true);
   });
 
   it('direct YAML path is exercised when Hermes CLI is unavailable', async () => {
@@ -303,7 +305,7 @@ describe('hermes setup handler', () => {
       'AUTOMEM_HERMES_PROVIDER_TOOLS=false'
     );
 
-    const agents = fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf8');
+    const agents = fs.readFileSync(path.join(tmpDir, 'SOUL.md'), 'utf8');
     expect(agents).toContain('Provider-only mode');
     expect(agents).toContain('automem_recall_memory');
     expect(agents).not.toContain('mcp_automem_recall_memory');
@@ -390,25 +392,58 @@ describe('hermes setup handler', () => {
       fs.readFileSync(path.join(tmpDir, 'plugins', 'automem', '__init__.py'), 'utf8')
     ).toContain('AUTOMEM_HERMES_PROVIDER_TOOLS');
 
-    const agents = fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf8');
+    const agents = fs.readFileSync(path.join(tmpDir, 'SOUL.md'), 'utf8');
     expect(agents).toContain('Both mode');
     expect(agents).toContain('mcp_automem_recall_memory');
     expect(agents).toContain('provider explicit tools are disabled');
     expect(agents).not.toMatch(/`automem_recall_memory`/);
   });
 
-  it('removes stale AutoMem Codex rules from Hermes AGENTS.md', async () => {
-    const agentsPath = path.join(tmpDir, 'AGENTS.md');
+  it('appends the rules to an existing SOUL.md and keeps the persona intact', async () => {
+    const soulPath = path.join(tmpDir, 'SOUL.md');
+    const persona = '# Persona\n\nYou are a terse assistant.\n';
+    fs.writeFileSync(soulPath, persona);
+
+    const opts = {
+      targetDir: tmpDir,
+      projectName: 'test-project',
+      endpoint: 'https://example.automem.test',
+      quiet: true,
+    };
+    await applyHermesSetup(opts);
+    const afterFirst = fs.readFileSync(soulPath, 'utf8');
+    expect(afterFirst.startsWith(persona)).toBe(true);
+    expect(afterFirst.match(/BEGIN AUTOMEM HERMES RULES/g)).toHaveLength(1);
+
+    // A mode switch replaces the block in place: one block, persona untouched.
+    await applyHermesSetup({ ...opts, mode: 'provider' });
+    const afterSwitch = fs.readFileSync(soulPath, 'utf8');
+    expect(afterSwitch.startsWith(persona)).toBe(true);
+    expect(afterSwitch.match(/BEGIN AUTOMEM HERMES RULES/g)).toHaveLength(1);
+    expect(afterSwitch).toContain('Provider-only mode');
+    expect(afterSwitch).not.toContain('MCP-only mode');
+
+    await applyHermesSetup({ ...opts, mode: 'provider' });
+    expect(fs.readFileSync(soulPath, 'utf8')).toBe(afterSwitch);
+  });
+
+  it('migrates legacy rules out of <HERMES_HOME>/AGENTS.md', async () => {
+    const legacyPath = path.join(tmpDir, 'AGENTS.md');
     fs.writeFileSync(
-      agentsPath,
+      legacyPath,
       [
-        '# Existing Hermes Rules',
+        '# Existing Hermes Notes',
+        '',
+        '<!-- BEGIN AUTOMEM HERMES RULES -->',
+        'Old rules Hermes never loaded.',
+        '<!-- END AUTOMEM HERMES RULES -->',
         '',
         '<!-- BEGIN AUTOMEM CODEX RULES -->',
         'Stale Codex guidance says use mcp__memory__recall_memory.',
         '<!-- END AUTOMEM CODEX RULES -->',
         '',
-        'Keep this unrelated Hermes rule.',
+        'Keep this unrelated note.',
+        '',
       ].join('\n')
     );
 
@@ -420,13 +455,91 @@ describe('hermes setup handler', () => {
       quiet: true,
     });
 
-    const agents = fs.readFileSync(agentsPath, 'utf8');
-    expect(agents).toContain('# Existing Hermes Rules');
-    expect(agents).toContain('Keep this unrelated Hermes rule.');
-    expect(agents).toContain('<!-- BEGIN AUTOMEM HERMES RULES -->');
-    expect(agents).toContain('Provider-only mode');
-    expect(agents).not.toContain('<!-- BEGIN AUTOMEM CODEX RULES -->');
-    expect(agents).not.toContain('mcp__memory__recall_memory');
+    expect(fs.readFileSync(legacyPath, 'utf8')).toBe(
+      '# Existing Hermes Notes\n\nKeep this unrelated note.\n'
+    );
+    const soul = fs.readFileSync(path.join(tmpDir, 'SOUL.md'), 'utf8');
+    expect(soul).toContain('<!-- BEGIN AUTOMEM HERMES RULES -->');
+    expect(soul).toContain('Provider-only mode');
+    expect(soul).not.toContain('Old rules Hermes never loaded.');
+  });
+
+  it('removes a stale AutoMem Codex block from the legacy AGENTS.md on its own', async () => {
+    const legacyPath = path.join(tmpDir, 'AGENTS.md');
+    fs.writeFileSync(
+      legacyPath,
+      [
+        '# Existing Hermes Notes',
+        '',
+        '<!-- BEGIN AUTOMEM CODEX RULES -->',
+        'Stale Codex guidance says use mcp__memory__recall_memory.',
+        '<!-- END AUTOMEM CODEX RULES -->',
+        '',
+      ].join('\n')
+    );
+
+    await applyHermesSetup({
+      targetDir: tmpDir,
+      projectName: 'test-project',
+      endpoint: 'https://example.automem.test',
+      quiet: true,
+    });
+
+    expect(fs.readFileSync(legacyPath, 'utf8')).toBe('# Existing Hermes Notes\n');
+  });
+
+  it('deletes a legacy AGENTS.md that held only the AutoMem block', async () => {
+    const legacyPath = path.join(tmpDir, 'AGENTS.md');
+    fs.writeFileSync(
+      legacyPath,
+      '<!-- BEGIN AUTOMEM HERMES RULES -->\nold\n<!-- END AUTOMEM HERMES RULES -->\n'
+    );
+
+    await applyHermesSetup({
+      targetDir: tmpDir,
+      projectName: 'test-project',
+      endpoint: 'https://example.automem.test',
+      quiet: true,
+    });
+
+    expect(fs.existsSync(legacyPath)).toBe(false);
+    // The removed file is recoverable from its backup.
+    expect(fs.readFileSync(`${legacyPath}.bak`, 'utf8')).toContain('old');
+    expect(fs.readFileSync(path.join(tmpDir, 'SOUL.md'), 'utf8')).toContain(
+      'BEGIN AUTOMEM HERMES RULES'
+    );
+  });
+
+  it('leaves a legacy AGENTS.md with stray markers untouched', async () => {
+    const legacyPath = path.join(tmpDir, 'AGENTS.md');
+    const handWritten = '# Notes\n<!-- BEGIN AUTOMEM HERMES RULES -->\nhalf a block\n';
+    fs.writeFileSync(legacyPath, handWritten);
+
+    await applyHermesSetup({
+      targetDir: tmpDir,
+      projectName: 'test-project',
+      endpoint: 'https://example.automem.test',
+      quiet: true,
+    });
+
+    expect(fs.readFileSync(legacyPath, 'utf8')).toBe(handWritten);
+    expect(fs.readFileSync(path.join(tmpDir, 'SOUL.md'), 'utf8')).toContain(
+      'BEGIN AUTOMEM HERMES RULES'
+    );
+  });
+
+  it('--rules pointing at the legacy AGENTS.md still writes there', async () => {
+    const legacyPath = path.join(tmpDir, 'AGENTS.md');
+    await applyHermesSetup({
+      targetDir: tmpDir,
+      rulesPath: legacyPath,
+      projectName: 'test-project',
+      endpoint: 'https://example.automem.test',
+      quiet: true,
+    });
+
+    expect(fs.readFileSync(legacyPath, 'utf8')).toContain('BEGIN AUTOMEM HERMES RULES');
+    expect(fs.existsSync(path.join(tmpDir, 'SOUL.md'))).toBe(false);
   });
 
   // Hermes carried the same defect the Grok PR filed three times: an inherited key was
@@ -657,7 +770,7 @@ describe('hermes setup handler', () => {
   // indexOf-based check calls the file well-formed and replaces from the first start
   // through the end — silently deleting the second marker and the user's notes.
   it('refuses when the rules file has two start markers and one end', async () => {
-    const agentsPath = path.join(tmpDir, 'AGENTS.md');
+    const soulPath = path.join(tmpDir, 'SOUL.md');
     const handWritten = [
       '# Existing Hermes Rules',
       '<!-- BEGIN AUTOMEM HERMES RULES -->',
@@ -667,7 +780,7 @@ describe('hermes setup handler', () => {
       '<!-- END AUTOMEM HERMES RULES -->',
       '',
     ].join('\n');
-    fs.writeFileSync(agentsPath, handWritten);
+    fs.writeFileSync(soulPath, handWritten);
 
     await expect(
       applyHermesSetup({
@@ -678,7 +791,7 @@ describe('hermes setup handler', () => {
       })
     ).rejects.toThrow(/found 2 start markers and 1 end marker/);
 
-    expect(fs.readFileSync(agentsPath, 'utf8')).toBe(handWritten);
+    expect(fs.readFileSync(soulPath, 'utf8')).toBe(handWritten);
   });
 
   // A rejected run must not leave Hermes half-reconfigured. Validation runs before the
@@ -697,7 +810,7 @@ describe('hermes setup handler', () => {
     const configPath = path.join(tmpDir, 'config.yaml');
     const envPath = path.join(tmpDir, '.env');
     const providerPath = path.join(tmpDir, 'plugins', 'automem', '__init__.py');
-    const agentsPath = path.join(tmpDir, 'AGENTS.md');
+    const soulPath = path.join(tmpDir, 'SOUL.md');
     const configBefore = fs.readFileSync(configPath, 'utf8');
     const envBefore = fs.readFileSync(envPath, 'utf8');
     const providerBefore = fs.readFileSync(providerPath, 'utf8');
@@ -712,7 +825,7 @@ describe('hermes setup handler', () => {
       '<!-- END AUTOMEM HERMES RULES -->',
       '',
     ].join('\n');
-    fs.writeFileSync(agentsPath, handWritten);
+    fs.writeFileSync(soulPath, handWritten);
 
     await expect(
       applyHermesSetup({
@@ -728,17 +841,17 @@ describe('hermes setup handler', () => {
     expect(fs.readFileSync(configPath, 'utf8')).toBe(configBefore);
     expect(fs.readFileSync(envPath, 'utf8')).toBe(envBefore);
     expect(fs.readFileSync(providerPath, 'utf8')).toBe(providerBefore);
-    expect(fs.readFileSync(agentsPath, 'utf8')).toBe(handWritten);
+    expect(fs.readFileSync(soulPath, 'utf8')).toBe(handWritten);
     expect(configBefore).toContain('https://live.example.test');
     expect(configBefore).not.toContain('https://other.example.test');
   });
 
   it('refuses a one-sided Hermes marker instead of appending', async () => {
-    const agentsPath = path.join(tmpDir, 'AGENTS.md');
+    const soulPath = path.join(tmpDir, 'SOUL.md');
     const handWritten = ['# Notes', '<!-- BEGIN AUTOMEM HERMES RULES -->', 'half a block', ''].join(
       '\n'
     );
-    fs.writeFileSync(agentsPath, handWritten);
+    fs.writeFileSync(soulPath, handWritten);
 
     await expect(
       applyHermesSetup({
@@ -749,29 +862,27 @@ describe('hermes setup handler', () => {
       })
     ).rejects.toThrow(/without a matching/);
 
-    expect(fs.readFileSync(agentsPath, 'utf8')).toBe(handWritten);
+    expect(fs.readFileSync(soulPath, 'utf8')).toBe(handWritten);
   });
 
   // Dropping the legacy Codex block is a migration, not this run's responsibility. A
   // stray Codex marker must not block the Hermes install — the Codex block is simply
   // left alone, markers and all, for the user to sort out.
-  it('installs anyway when a stale Codex block has a stray marker', async () => {
-    const agentsPath = path.join(tmpDir, 'AGENTS.md');
-    fs.writeFileSync(
-      agentsPath,
-      [
-        '# Existing Hermes Rules',
-        '',
-        '<!-- BEGIN AUTOMEM CODEX RULES -->',
-        'stale codex guidance',
-        '<!-- BEGIN AUTOMEM CODEX RULES -->',
-        'notes the user wrote between the markers',
-        '<!-- END AUTOMEM CODEX RULES -->',
-        '',
-        'Keep this unrelated Hermes rule.',
-        '',
-      ].join('\n')
-    );
+  it('leaves a legacy Codex block with a stray marker alone', async () => {
+    const legacyPath = path.join(tmpDir, 'AGENTS.md');
+    const handWritten = [
+      '# Existing Hermes Rules',
+      '',
+      '<!-- BEGIN AUTOMEM CODEX RULES -->',
+      'stale codex guidance',
+      '<!-- BEGIN AUTOMEM CODEX RULES -->',
+      'notes the user wrote between the markers',
+      '<!-- END AUTOMEM CODEX RULES -->',
+      '',
+      'Keep this unrelated Hermes rule.',
+      '',
+    ].join('\n');
+    fs.writeFileSync(legacyPath, handWritten);
 
     await applyHermesSetup({
       mode: 'provider',
@@ -781,11 +892,10 @@ describe('hermes setup handler', () => {
       quiet: true,
     });
 
-    const agents = fs.readFileSync(agentsPath, 'utf8');
-    expect(agents).toContain('<!-- BEGIN AUTOMEM HERMES RULES -->');
-    expect(agents).toContain('Keep this unrelated Hermes rule.');
+    expect(fs.readFileSync(path.join(tmpDir, 'SOUL.md'), 'utf8')).toContain(
+      '<!-- BEGIN AUTOMEM HERMES RULES -->'
+    );
     // Nothing between the stray Codex markers was taken along with the migration.
-    expect(agents).toContain('notes the user wrote between the markers');
-    expect(agents).toContain('<!-- END AUTOMEM CODEX RULES -->');
+    expect(fs.readFileSync(legacyPath, 'utf8')).toBe(handWritten);
   });
 });

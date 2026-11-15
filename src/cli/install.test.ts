@@ -1165,7 +1165,7 @@ describe('guided install helpers', () => {
     const hermesAction = plan.actions.find((action) => action.client === 'hermes');
     expect(hermesAction?.paths).toEqual([
       path.join(hermesHome, 'config.yaml'),
-      path.join(hermesHome, 'AGENTS.md'),
+      path.join(hermesHome, 'SOUL.md'),
     ]);
   });
 
@@ -1196,7 +1196,7 @@ describe('guided install helpers', () => {
     expect(hermesAction?.detail).toContain('provider');
     expect(hermesAction?.paths).toEqual([
       path.join(hermesHome, 'config.yaml'),
-      path.join(hermesHome, 'AGENTS.md'),
+      path.join(hermesHome, 'SOUL.md'),
       path.join(hermesHome, 'plugins', 'automem', '__init__.py'),
       path.join(hermesHome, 'plugins', 'automem', 'plugin.yaml'),
       path.join(hermesHome, '.env'),

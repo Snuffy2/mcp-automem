@@ -2,7 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
+  backupPath,
   CommonOptions,
+  describeMarkedBlockDefect,
   detectProjectName,
   log,
   type MarkedBlockMarkers,
@@ -63,6 +65,64 @@ function upsertRulesWithMarkers(existing: string | null, block: string, rulesPat
   const codexScan = scanMarkedBlock(existing, CODEX_RULES_MARKERS);
   const cleaned = codexScan.paired ? stripMarkedBlock(existing, CODEX_RULES_MARKERS) : existing;
   return upsertMarkedBlock(cleaned, block, HERMES_RULES_MARKERS, rulesPath);
+}
+
+export type HermesRulesStripResult = 'absent' | 'stripped' | 'removed' | 'malformed' | 'dry-run';
+
+/**
+ * Remove the AutoMem Hermes rules block from `filePath`, keeping everything else in the
+ * file. With `legacyCodex`, a paired AutoMem Codex block is removed too: old Hermes
+ * installers wrote the Codex rules into <HERMES_HOME>/AGENTS.md. Only pass it for that
+ * file — anywhere else a Codex block may be a live Codex install.
+ *
+ * A file left holding nothing but whitespace is deleted rather than kept empty: for
+ * SOUL.md that lets Hermes seed its default identity again (it only seeds a missing
+ * file), and an empty legacy AGENTS.md serves no one. A backup is written first either
+ * way. A file whose Hermes markers are unpaired is left untouched and reported as
+ * `malformed` — cutting at a stray marker could delete user text.
+ */
+export function stripHermesRulesFromFile(
+  filePath: string,
+  options: Pick<CommonOptions, 'dryRun' | 'quiet'> & { legacyCodex?: boolean }
+): HermesRulesStripResult {
+  if (!fs.existsSync(filePath)) return 'absent';
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const hermesScan = scanMarkedBlock(raw, HERMES_RULES_MARKERS);
+  const codexPaired =
+    Boolean(options.legacyCodex) && scanMarkedBlock(raw, CODEX_RULES_MARKERS).paired;
+  if (hermesScan.absent && !codexPaired) return 'absent';
+  if (!hermesScan.absent && !hermesScan.paired) {
+    log(
+      `⚠️  Left ${filePath} untouched — ${describeMarkedBlockDefect(hermesScan, HERMES_RULES_MARKERS)}. ` +
+        'Remove the AutoMem block by hand.',
+      options.quiet
+    );
+    return 'malformed';
+  }
+  if (options.dryRun) {
+    log(`[DRY RUN] Would strip AutoMem block from: ${filePath}`, options.quiet);
+    return 'dry-run';
+  }
+
+  let next = hermesScan.absent ? raw : stripMarkedBlock(raw, HERMES_RULES_MARKERS);
+  if (codexPaired) next = stripMarkedBlock(next, CODEX_RULES_MARKERS);
+  const backup = backupPath(filePath);
+  fs.copyFileSync(filePath, backup);
+  const trimmed = next.trim();
+  if (!trimmed) {
+    fs.unlinkSync(filePath);
+    log(`🗑️  Removed ${filePath} (it held only the AutoMem block)`, options.quiet);
+    log(`   Backup: ${backup}`, options.quiet);
+    return 'removed';
+  }
+  fs.writeFileSync(filePath, `${trimmed}\n`, 'utf8');
+  log(`🗑️  Stripped AutoMem block from ${filePath}`, options.quiet);
+  log(`   Backup: ${backup}`, options.quiet);
+  return 'stripped';
+}
+
+function samePath(a: string, b: string): boolean {
+  return path.resolve(a) === path.resolve(b);
 }
 
 function formatEnvValue(value: string): string {
@@ -228,7 +288,10 @@ export async function applyHermesSetup(cliOptions: HermesSetupOptions): Promise<
     storedEndpoint: existing.endpoint,
     storedKey: existing.apiKey,
   });
-  const rulesPath = cliOptions.rulesPath ?? paths.agentsPath;
+  // SOUL.md, not AGENTS.md: Hermes loads <HERMES_HOME>/SOUL.md into every session but
+  // reads AGENTS.md only from the session's working-directory chain, so rules in
+  // <HERMES_HOME>/AGENTS.md never reached the prompt.
+  const rulesPath = cliOptions.rulesPath ?? paths.soulPath;
 
   log(`\n🔧 Setting up Hermes AutoMem for: ${projectName}`, cliOptions.quiet);
   log(`🧭 Mode: ${mode}`, cliOptions.quiet);
@@ -306,7 +369,14 @@ export async function applyHermesSetup(cliOptions: HermesSetupOptions): Promise<
     installHermesProvider(paths, endpoint, apiKey, mode === 'provider', cliOptions);
   }
 
+  const createdSoul = samePath(rulesPath, paths.soulPath) && existingContent === null;
   writeFileWithBackup(rulesPath, finalContent, cliOptions);
+
+  // Earlier releases wrote the rules to <HERMES_HOME>/AGENTS.md, which Hermes never
+  // loads. Drop that dead block now that the rules live where Hermes reads them.
+  if (!samePath(rulesPath, paths.agentsPath)) {
+    stripHermesRulesFromFile(paths.agentsPath, { ...cliOptions, legacyCodex: true });
+  }
 
   log('\n📊 Configuration Status:', cliOptions.quiet);
   if (mode === 'mcp' || mode === 'both') {
@@ -324,6 +394,13 @@ export async function applyHermesSetup(cliOptions: HermesSetupOptions): Promise<
     );
   }
   log(`  ✅ AutoMem rules installed in ${path.basename(rulesPath)}`, cliOptions.quiet);
+  if (createdSoul && !cliOptions.dryRun) {
+    log(
+      '  ℹ️  SOUL.md did not exist, so it now holds only the AutoMem rules. Hermes seeds its ' +
+        'default persona only into a missing SOUL.md — add your own persona above the block if you want one.',
+      cliOptions.quiet
+    );
+  }
   if (!apiKey) {
     log(
       '  ⚠️  No AUTOMEM_API_KEY set — set one before connecting to a remote AutoMem instance',

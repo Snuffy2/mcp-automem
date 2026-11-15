@@ -33,6 +33,7 @@ describe('hermes-config', () => {
       const p = resolveHermesPaths({ dir: '/custom/hermes' });
       expect(p.home).toBe('/custom/hermes');
       expect(p.configPath).toBe('/custom/hermes/config.yaml');
+      expect(p.soulPath).toBe('/custom/hermes/SOUL.md');
       expect(p.agentsPath).toBe('/custom/hermes/AGENTS.md');
     });
 
@@ -90,7 +91,12 @@ describe('hermes-config', () => {
     it('creates a fresh config.yaml when none exists', async () => {
       const configPath = path.join(tmpDir, 'config.yaml');
       const result = await upsertMcpServer(
-        { home: tmpDir, configPath, agentsPath: path.join(tmpDir, 'AGENTS.md') },
+        {
+          home: tmpDir,
+          configPath,
+          soulPath: path.join(tmpDir, 'SOUL.md'),
+          agentsPath: path.join(tmpDir, 'AGENTS.md'),
+        },
         'automem',
         buildAutoMemServerEntry('http://127.0.0.1:8001', 'sk-x'),
         { quiet: true }
@@ -124,7 +130,12 @@ describe('hermes-config', () => {
       );
 
       await upsertMcpServer(
-        { home: tmpDir, configPath, agentsPath: path.join(tmpDir, 'AGENTS.md') },
+        {
+          home: tmpDir,
+          configPath,
+          soulPath: path.join(tmpDir, 'SOUL.md'),
+          agentsPath: path.join(tmpDir, 'AGENTS.md'),
+        },
         'automem',
         buildAutoMemServerEntry('http://127.0.0.1:8001'),
         { quiet: true }
@@ -145,7 +156,12 @@ describe('hermes-config', () => {
     it('is idempotent — re-running returns changed: false', async () => {
       const configPath = path.join(tmpDir, 'config.yaml');
       const entry = buildAutoMemServerEntry('http://127.0.0.1:8001', 'sk-x');
-      const paths = { home: tmpDir, configPath, agentsPath: path.join(tmpDir, 'AGENTS.md') };
+      const paths = {
+        home: tmpDir,
+        configPath,
+        soulPath: path.join(tmpDir, 'SOUL.md'),
+        agentsPath: path.join(tmpDir, 'AGENTS.md'),
+      };
 
       const first = await upsertMcpServer(paths, 'automem', entry, { quiet: true });
       expect(first.changed).toBe(true);
@@ -173,7 +189,12 @@ describe('hermes-config', () => {
       );
 
       const result = await upsertMcpServer(
-        { home: tmpDir, configPath, agentsPath: path.join(tmpDir, 'AGENTS.md') },
+        {
+          home: tmpDir,
+          configPath,
+          soulPath: path.join(tmpDir, 'SOUL.md'),
+          agentsPath: path.join(tmpDir, 'AGENTS.md'),
+        },
         'automem',
         buildAutoMemServerEntry('http://127.0.0.1:8001'),
         { quiet: true }
@@ -193,7 +214,12 @@ describe('hermes-config', () => {
     it('reports dry-run without writing', async () => {
       const configPath = path.join(tmpDir, 'config.yaml');
       const result = await upsertMcpServer(
-        { home: tmpDir, configPath, agentsPath: path.join(tmpDir, 'AGENTS.md') },
+        {
+          home: tmpDir,
+          configPath,
+          soulPath: path.join(tmpDir, 'SOUL.md'),
+          agentsPath: path.join(tmpDir, 'AGENTS.md'),
+        },
         'automem',
         buildAutoMemServerEntry('http://127.0.0.1:8001'),
         { dryRun: true, quiet: true }
@@ -302,7 +328,12 @@ describe('hermes-config', () => {
       fs.writeFileSync(configPath, MALFORMED);
       await expect(
         upsertMcpServer(
-          { home: tmpDir, configPath, agentsPath: path.join(tmpDir, 'AGENTS.md') },
+          {
+            home: tmpDir,
+            configPath,
+            soulPath: path.join(tmpDir, 'SOUL.md'),
+            agentsPath: path.join(tmpDir, 'AGENTS.md'),
+          },
           'automem',
           buildAutoMemServerEntry('http://127.0.0.1:8001'),
           { quiet: true }
@@ -325,6 +356,7 @@ describe('hermes-config', () => {
     const paths = (dir: string) => ({
       home: dir,
       configPath: path.join(dir, 'config.yaml'),
+      soulPath: path.join(dir, 'SOUL.md'),
       agentsPath: path.join(dir, 'AGENTS.md'),
     });
 

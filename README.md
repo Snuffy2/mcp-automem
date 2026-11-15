@@ -143,6 +143,10 @@ modified file keeps a `.bak` backup. Add `--dry-run` to preview, `--yes` to
 apply non-interactively. See the [Installation Guide](INSTALLATION.md#guided-install-fastest)
 for all flags.
 
+Hermes gets its memory rules in `$HERMES_HOME/SOUL.md` (a marked AutoMem block; your
+persona text is kept), because that is the file Hermes loads into every session. See
+[Hermes Agent](INSTALLATION.md#where-the-rules-live).
+
 `setup` is an alias of `install`. To print config snippets again later, use `npx @verygoodplugins/mcp-automem@latest config`.
 
 After an interactive install, you can start a short welcome conversation that
