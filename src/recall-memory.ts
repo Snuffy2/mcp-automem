@@ -223,8 +223,14 @@ function buildStructuredEnvelope(
   const results = recallResult.results || [];
   const isEnumeration = recallResult.mode === 'enumeration';
   const trimmedPage = isEnumeration && returned < results.length;
+  // Server records this response covers. current_only filtering can drop records from
+  // the server page, so it is counted in server positions, not in results kept.
+  const page = recallResult.enumeration_page;
+  const consumed = trimmedPage
+    ? (page?.positions[returned] ?? returned)
+    : (page?.scanned ?? results.length);
   const hasMore = trimmedPage ? true : recallResult.has_more;
-  const limit = trimmedPage ? returned : recallResult.limit;
+  const limit = trimmedPage ? consumed : recallResult.limit;
   const offset = recallResult.offset;
   return {
     count: trimmedPage ? returned : (recallResult.count ?? results.length),
@@ -232,7 +238,7 @@ function buildStructuredEnvelope(
     ...(typeof hasMore === 'boolean' ? { has_more: hasMore } : {}),
     ...(typeof limit === 'number' ? { limit } : {}),
     ...(typeof offset === 'number' ? { offset } : {}),
-    ...(isEnumeration && hasMore === true ? { next_offset: (offset ?? 0) + returned } : {}),
+    ...(isEnumeration && hasMore === true ? { next_offset: (offset ?? 0) + consumed } : {}),
     ...(typeof recallResult.dedup_removed === 'number'
       ? { dedup_removed: recallResult.dedup_removed }
       : {}),

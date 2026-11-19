@@ -720,6 +720,88 @@ describe('AutoMemClient', () => {
       expect(result.results).toHaveLength(2);
     });
 
+    it('should hide non-current memories by default and keep server page metadata', async () => {
+      const past = '2026-01-01T00:00:00+00:00';
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          tags: ['preference'],
+          count: 6,
+          limit: 6,
+          offset: 12,
+          has_more: true,
+          memories: [
+            { id: 'current', content: 'A', t_valid: past },
+            { id: 'superseded', content: 'B', t_invalid: past },
+            { id: 'naive-expired', content: 'C', t_invalid: '2026-01-01T00:00:00' },
+            { id: 'archived', content: 'D', archived: true },
+            { id: 'future', content: 'E', t_valid: '2999-01-01T00:00:00Z' },
+            { id: 'expires-later', content: 'F', t_invalid: '2999-01-01T00:00:00Z' },
+          ],
+        }),
+      } as any);
+
+      const result = await client.recallMemory({
+        tags: ['preference'],
+        exhaustive: true,
+        limit: 6,
+        offset: 12,
+      });
+
+      expect(mockFetch.mock.calls[0][0]).not.toContain('current_only');
+      expect(result.results.map((r) => r.id)).toEqual(['current', 'expires-later']);
+      expect(result).toMatchObject({
+        count: 2,
+        limit: 6,
+        offset: 12,
+        has_more: true,
+        state_mode: 'current',
+        state_filter: { current_only: true, suppressed_count: 4, replacement_count: 0 },
+        enumeration_page: { scanned: 6, positions: [0, 5] },
+      });
+    });
+
+    it('should return full history with current_only: false, which wins over state_mode', async () => {
+      const page = {
+        count: 2,
+        limit: 20,
+        offset: 0,
+        has_more: false,
+        memories: [
+          { id: 'current', content: 'A' },
+          { id: 'superseded', content: 'B', t_invalid: '2026-01-01T00:00:00Z' },
+        ],
+      };
+      mockFetch.mockResolvedValue({ ok: true, json: async () => page } as any);
+
+      const history = await client.recallMemory({
+        tags: ['x'],
+        exhaustive: true,
+        current_only: false,
+        state_mode: 'current',
+      });
+      const viaStateMode = await client.recallMemory({
+        tags: ['x'],
+        exhaustive: true,
+        state_mode: 'history',
+      });
+      const current = await client.recallMemory({
+        tags: ['x'],
+        exhaustive: true,
+        current_only: true,
+        state_mode: 'history',
+      });
+
+      for (const result of [history, viaStateMode]) {
+        expect(result.results.map((r) => r.id)).toEqual(['current', 'superseded']);
+        expect(result.state_mode).toBe('history');
+        expect(result.state_filter).toBeUndefined();
+        expect(result.results[1].memory.t_invalid).toBe('2026-01-01T00:00:00Z');
+      }
+      expect(current.results.map((r) => r.id)).toEqual(['current']);
+      expect(current.state_mode).toBe('current');
+    });
+
     it('should pass through limit and offset, clamping limit at 200', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -787,7 +869,7 @@ describe('AutoMemClient', () => {
         client.recallMemory({
           tags: ['x'],
           exhaustive: true,
-          state_mode: 'history',
+          state_debug: true,
           recency_bias: 'auto',
           scope_fallback: true,
           expand_respect_tags: true,
@@ -795,7 +877,7 @@ describe('AutoMemClient', () => {
           adaptive_floor: false,
         } as any)
       ).rejects.toThrow(
-        /state_mode.*recency_bias.*scope_fallback.*expand_respect_tags.*min_score.*adaptive_floor/
+        /state_debug.*recency_bias.*scope_fallback.*expand_respect_tags.*min_score.*adaptive_floor/
       );
     });
 

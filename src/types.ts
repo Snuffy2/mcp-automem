@@ -139,6 +139,9 @@ export interface RecallResult {
   has_more?: boolean;
   limit?: number;
   offset?: number;
+  // Enumeration only, never serialized: how many server records the page covered and the
+  // server-relative index of each kept result, so pagination survives client-side filtering.
+  enumeration_page?: { scanned: number; positions: number[] };
   expansion?: {
     enabled: boolean;
     seed_count: number;
