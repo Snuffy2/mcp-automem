@@ -976,7 +976,7 @@ function defaultLocalDir(homeDir: string): string {
 function hermesPaths(environment: InstallEnvironment, mode: HermesInstallMode): string[] {
   const base = [
     path.join(environment.clientRoots.hermes, 'config.yaml'),
-    path.join(environment.clientRoots.hermes, 'AGENTS.md'),
+    path.join(environment.clientRoots.hermes, 'SOUL.md'),
   ];
   if (mode === 'provider' || mode === 'both') {
     base.push(

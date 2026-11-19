@@ -20,7 +20,7 @@ import { GROK_RULES_END, GROK_RULES_START, stripGrokRulesMarkers } from './grok.
 import { CODEX_RULES_END, CODEX_RULES_START } from './codex.js';
 import { removeCodexMemory, resolveCodexPaths } from './codex-config.js';
 import { COPILOT_RULES_END, COPILOT_RULES_START } from './copilot.js';
-import { HERMES_RULES_END, HERMES_RULES_START } from './hermes.js';
+import { stripHermesRulesFromFile } from './hermes.js';
 import { isAutoMemServerEntry } from './host-toolkit.js';
 import {
   assertCursorHooksRemovable,
@@ -266,9 +266,10 @@ async function uninstallCursor(options: UninstallOptions): Promise<void> {
 
 async function uninstallHermes(options: UninstallOptions): Promise<void> {
   const paths = resolveHermesPaths({ dir: options.projectDir });
-  // Mirror `hermes` setup's --rules: strip the AutoMem block from the same
-  // rules file it was installed into (defaults to <hermes-home>/AGENTS.md).
-  const rulesFile = options.rulesPath ?? paths.agentsPath;
+  // Mirror `hermes` setup's --rules: strip the AutoMem block from the same rules file
+  // it was installed into. By default that is <hermes-home>/SOUL.md, plus the legacy
+  // <hermes-home>/AGENTS.md that releases before the SOUL.md move wrote to.
+  const rulesFiles = options.rulesPath ? [options.rulesPath] : [paths.soulPath, paths.agentsPath];
 
   log('\n🗑️  Uninstalling Hermes AutoMem...', options.quiet);
 
@@ -294,29 +295,15 @@ async function uninstallHermes(options: UninstallOptions): Promise<void> {
     log(`ℹ️  No Hermes config at ${paths.configPath}`, options.quiet);
   }
 
-  if (fs.existsSync(rulesFile)) {
-    const start = HERMES_RULES_START;
-    const end = HERMES_RULES_END;
-    const raw = fs.readFileSync(rulesFile, 'utf8');
-    const startIdx = raw.indexOf(start);
-    const endIdx = raw.indexOf(end);
-
-    if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+  for (const rulesFile of rulesFiles) {
+    const result = stripHermesRulesFromFile(rulesFile, {
+      dryRun: options.dryRun,
+      quiet: options.quiet,
+      legacyCodex: !options.rulesPath && rulesFile === paths.agentsPath,
+    });
+    if (result === 'stripped' || result === 'removed') didChange = true;
+    if (result === 'absent' && rulesFiles.length === 1) {
       log(`ℹ️  No AutoMem rule block in ${rulesFile}`, options.quiet);
-    } else if (options.dryRun) {
-      log(`[DRY RUN] Would strip AutoMem block from: ${rulesFile}`, options.quiet);
-    } else {
-      const before = raw.slice(0, startIdx).replace(/\s+$/, '');
-      const after = raw.slice(endIdx + end.length).replace(/^\s+/, '');
-      // Collapse trailing newlines to exactly one (`after` keeps its own).
-      const joined = before && after ? `${before}\n\n${after}` : `${before}${after}`;
-      const next = `${joined.replace(/\n+$/, '')}\n`;
-      const backupPath = `${rulesFile}.backup.${Date.now()}`;
-      fs.copyFileSync(rulesFile, backupPath);
-      fs.writeFileSync(rulesFile, next, 'utf8');
-      log(`🗑️  Stripped AutoMem block from ${rulesFile}`, options.quiet);
-      log(`   Backup: ${backupPath}`, options.quiet);
-      didChange = true;
     }
   }
 

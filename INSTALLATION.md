@@ -1059,6 +1059,14 @@ npx @verygoodplugins/mcp-automem@latest hermes --mode both
 
 `--mode both` keeps explicit tools on the MCP path only and writes `AUTOMEM_HERMES_PROVIDER_TOOLS=false` so Hermes does not expose duplicate `automem_*` provider tools.
 
+#### Where the rules live
+
+Every mode installs the AutoMem memory rules into **`$HERMES_HOME/SOUL.md`** (default `~/.hermes/SOUL.md`), inside a `<!-- BEGIN AUTOMEM HERMES RULES -->` … `<!-- END AUTOMEM HERMES RULES -->` block. Hermes loads `SOUL.md` from `HERMES_HOME` into every session, whatever directory the session runs in. Your own persona text outside the block is preserved; re-running the installer replaces only the block, so it is safe to repeat or to switch modes.
+
+Hermes reads `AGENTS.md` only from the session's working-directory chain (git root down to the cwd), never from `HERMES_HOME`. Earlier releases wrote the rules to `$HERMES_HOME/AGENTS.md`, where Hermes never loaded them. Setup now strips that legacy block (and deletes the file if nothing else was in it, keeping a `.bak` backup), and leaves the file alone if its markers are malformed.
+
+If `SOUL.md` does not exist yet, setup creates it with just the AutoMem block. Hermes seeds its default persona only into a missing `SOUL.md`, so add your own persona above the block if you want one. Pass `--rules <path>` to write the block somewhere else; note Hermes only loads that file if it is one of its context files for the session.
+
 ### 2. Verify
 
 ```bash
@@ -1105,11 +1113,11 @@ npx @verygoodplugins/mcp-automem@latest uninstall hermes
 npx @verygoodplugins/mcp-automem@latest uninstall hermes --dry-run
 
 # Strip the AutoMem rules block from a custom rules file
-# (mirrors `hermes --rules <path>` at install time; defaults to $HERMES_HOME/AGENTS.md)
-npx @verygoodplugins/mcp-automem@latest uninstall hermes --rules /path/to/AGENTS.md
+# (mirrors `hermes --rules <path>` at install time; defaults to $HERMES_HOME/SOUL.md)
+npx @verygoodplugins/mcp-automem@latest uninstall hermes --rules /path/to/rules.md
 ```
 
-The Hermes uninstaller removes AutoMem's current config and known pre-release install targets, including `mcp_servers.automem`, AutoMem-owned `mcp_servers.memory`, `memory.provider: automem`, `$HERMES_HOME/plugins/automem`, AutoMem Hermes rules, and AutoMem keys in `$HERMES_HOME/.env`. Pass `--rules <path>` if you installed the rules block into a non-default file so the uninstaller strips that file instead of `$HERMES_HOME/AGENTS.md`.
+The Hermes uninstaller removes AutoMem's current config and known pre-release install targets, including `mcp_servers.automem`, AutoMem-owned `mcp_servers.memory`, `memory.provider: automem`, `$HERMES_HOME/plugins/automem`, AutoMem Hermes rules, and AutoMem keys in `$HERMES_HOME/.env`. By default it strips the rules block from `$HERMES_HOME/SOUL.md` and from the legacy `$HERMES_HOME/AGENTS.md`, keeping everything else; a file left holding nothing but the block is deleted (with a `.bak` backup) so Hermes can seed its default persona again. Pass `--rules <path>` if you installed the rules block into a non-default file so the uninstaller strips only that file.
 
 Hermes setup also removes a stale AutoMem Codex rules block from `$HERMES_HOME/AGENTS.md`. That pre-release block mentioned Codex/Claude-style `mcp__memory__*` tool names and can steer provider-only Hermes sessions toward the wrong namespace.
 

@@ -17,6 +17,16 @@ import { automemNpxArgs } from './templates.js';
 export interface HermesPaths {
   home: string;
   configPath: string;
+  /**
+   * Where the AutoMem rules live. Hermes injects `<HERMES_HOME>/SOUL.md` into every
+   * session (agent/prompt_builder.py `load_soul_md`).
+   */
+  soulPath: string;
+  /**
+   * Legacy rules location, kept only so install/uninstall can clean it up. Hermes reads
+   * AGENTS.md from the session's working-directory chain (git root down to cwd), never
+   * from HERMES_HOME, so rules written here were never loaded.
+   */
   agentsPath: string;
 }
 
@@ -78,6 +88,7 @@ export function resolveHermesPaths(opts: { dir?: string } = {}): HermesPaths {
   return {
     home,
     configPath: path.join(home, 'config.yaml'),
+    soulPath: path.join(home, 'SOUL.md'),
     agentsPath: path.join(home, 'AGENTS.md'),
   };
 }

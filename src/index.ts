@@ -209,7 +209,7 @@ UNINSTALL:
 
   Options:
     --dir <path>          Project / hermes-home / grok-home directory
-    --rules <path>        Rule file to remove (Cursor) or strip (default: codex <project>/AGENTS.md, hermes/grok <home>/AGENTS.md)
+    --rules <path>        Rule file to remove (Cursor) or strip (default: codex <project>/AGENTS.md, hermes <home>/SOUL.md, grok <home>/AGENTS.md)
     --clean-all          Also clean other hosts' MCP config (e.g. Claude Desktop)
     --dry-run           Show what would be removed
     --yes, -y           Skip confirmation
@@ -252,7 +252,7 @@ HERMES SETUP:
     --endpoint <url>      AutoMem endpoint (default: $AUTOMEM_API_URL or http://127.0.0.1:8001)
     --api-key <key>       AutoMem API key (optional)
     --mode <mode>         Install mode: mcp, provider, or both (default: mcp)
-    --rules <path>        Target rules file (default: <hermes-home>/AGENTS.md)
+    --rules <path>        Target rules file (default: <hermes-home>/SOUL.md)
     --dry-run             Show what would be changed
     --quiet               Suppress output
 
