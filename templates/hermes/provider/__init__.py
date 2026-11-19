@@ -347,7 +347,7 @@ class AutoMemMemoryProvider(MemoryProvider):
                 "# AutoMem\n"
                 "AutoMem is active as the Hermes memory provider. Ambient recall is "
                 "injected before each turn; use it when relevant. Durable memory writes "
-                "go through the AutoMem MCP server's mcp_automem_* tools."
+                "go through the AutoMem MCP server's mcp__automem__* tools."
             )
         return (
             "# AutoMem\n"

@@ -19,11 +19,11 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const HERMES_PYTHON = hermesPythonPath();
 const execFileAsync = promisify(execFile);
 const EXPECTED_MCP_TOOLS = [
-  'mcp_automem_associate_memories',
-  'mcp_automem_check_database_health',
-  'mcp_automem_recall_memory',
-  'mcp_automem_store_memory',
-  'mcp_automem_update_memory',
+  'mcp__automem__associate_memories',
+  'mcp__automem__check_database_health',
+  'mcp__automem__recall_memory',
+  'mcp__automem__store_memory',
+  'mcp__automem__update_memory',
 ].sort();
 const EXPECTED_PROVIDER_TOOLS = [
   'automem_associate_memories',
@@ -592,7 +592,7 @@ describe.skipIf(!HERMES_PYTHON)('Hermes real host integration', () => {
     // must not direct the agent to the now-unregistered automem_* provider
     // tools — it should point at the MCP surface instead.
     expect(contract.systemPrompt).not.toContain('automem_* tools for intentional');
-    expect(contract.systemPrompt).toContain('mcp_automem_*');
+    expect(contract.systemPrompt).toContain('mcp__automem__*');
     expect(
       fakeApi.requests.some((request) => request.method === 'POST' && request.path === '/memory')
     ).toBe(false);
@@ -910,8 +910,8 @@ describe.skipIf(!HERMES_PYTHON)('Hermes real host integration', () => {
 
     const before = await inspectHermesOfflineTurn(tmpDir);
     expect(before.duplicateToolNames).toMatchObject({
-      mcp_automem_recall_memory: 2,
-      mcp_automem_store_memory: 2,
+      mcp__automem__recall_memory: 2,
+      mcp__automem__store_memory: 2,
     });
 
     await runUninstall({

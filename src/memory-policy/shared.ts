@@ -997,11 +997,11 @@ export function renderClaudeDesktopInstructions(params: PolicyTemplateOptions): 
 export type HermesInstallMode = 'mcp' | 'provider' | 'both';
 
 const HERMES_MCP_TOOL_NAMES = [
-  'mcp_automem_recall_memory',
-  'mcp_automem_store_memory',
-  'mcp_automem_associate_memories',
-  'mcp_automem_update_memory',
-  'mcp_automem_check_database_health',
+  'mcp__automem__recall_memory',
+  'mcp__automem__store_memory',
+  'mcp__automem__associate_memories',
+  'mcp__automem__update_memory',
+  'mcp__automem__check_database_health',
 ] as const;
 
 const HERMES_PROVIDER_TOOL_NAMES = [
