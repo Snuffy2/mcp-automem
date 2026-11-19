@@ -38,6 +38,11 @@ def _provider_tools_enabled() -> bool:
     return value.strip().lower() not in {"0", "false", "no", "n", "off"}
 
 
+def _mirror_builtin_enabled() -> bool:
+    value = os.environ.get("AUTOMEM_HERMES_MIRROR_BUILTIN", "true")
+    return value.strip().lower() not in {"0", "false", "no", "n", "off"}
+
+
 def _active_provider() -> str:
     try:
         from hermes_cli.config import cfg_get, load_config
@@ -86,6 +91,7 @@ def cmd_status(args) -> int:
         "  auto capture:      "
         f"{'enabled' if _truthy(os.environ.get('AUTOMEM_HERMES_AUTO_CAPTURE', '')) else 'disabled'}"
     )
+    print(f"  built-in mirror:   {'enabled' if _mirror_builtin_enabled() else 'disabled'}")
     print(f"  debug logging:     {'enabled' if _truthy(os.environ.get('AUTOMEM_HERMES_DEBUG', '')) else 'disabled'}")
     print()
     if active != "automem":

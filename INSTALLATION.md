@@ -1076,6 +1076,28 @@ In provider mode, `hermes memory status` should show `Provider: automem` and `St
 
 Provider explicit recall is capped at 10 results in Hermes provider mode to keep accidental broad recalls from flooding a model turn. Ambient provider prefetch uses the provider profile: up to 5 preference memories, 10 task-context memories, and 10 debug memories, with the same 90-day task-context window used by the rules profile.
 
+#### Built-in memory mirroring
+
+In provider or both mode, writes Hermes makes with its built-in memory tool (`MEMORY.md` and `USER.md`) are mirrored to AutoMem through the provider's `on_memory_write` hook:
+
+| Built-in action | AutoMem effect |
+| --- | --- |
+| `add` | Stores the entry. |
+| `replace` (and `patch`, which Hermes reports as a replace) | Stores the new entry text; the earlier AutoMem copy is kept, and the old text is recorded in `metadata.previous_content`. A replace that changes nothing is skipped. |
+| `remove` | Nothing. The provider keeps no mapping from a built-in entry to an AutoMem memory id, and deleting by content match could remove memories you stored on purpose, so removals stay local to Hermes. |
+
+`USER.md` entries are stored with the `preference` tag and type `Preference`, so they come back in the preference recall phase. `MEMORY.md` entries get no tags. Every mirrored memory carries `metadata.source: hermes_builtin_memory`, plus `hermes_action`, `hermes_target`, and the Hermes provenance (`write_origin`, `session_id`, `platform`, ...). No `hermes` platform tag is added, following the bare-tag convention.
+
+Mirroring never blocks or breaks a Hermes turn. Stores are queued (up to 32) for a background worker, and each POST has a 5-second timeout. A failed or timed-out store is logged as a warning and dropped. It is not retried, because AutoMem may have committed a store that timed out, and a retry would write a duplicate. Empty entries and entries over 8,000 characters are skipped. Only primary agents mirror: cron, flush, and subagent contexts do not. Hermes scrubs secrets out of the content before it calls the provider.
+
+To turn mirroring off, set this in `$HERMES_HOME/.env`:
+
+```bash
+AUTOMEM_HERMES_MIRROR_BUILTIN=false
+```
+
+`hermes automem doctor` shows the current setting as `built-in mirror`.
+
 ### 3. See what recall injects
 
 Provider recall is injected into the model payload before each turn and is **not printed** in the terminal. To see the exact block AutoMem sends, run `debug-recall` with any prompt:
